@@ -1,0 +1,20 @@
+{
+  "name": "weather-mcp",
+  "version": "2.1.0",
+  "description": "Weather forecasts from a single allow-listed upstream API.",
+  "license": "Apache-2.0",
+  "author": { "name": "meridian-tools" },
+  "repository": { "url": "https://github.com/meridian-tools/weather-mcp" },
+  "homepage": "https://meridian.example/weather-mcp",
+  "dependencies": { "@modelcontextprotocol/sdk": "1.4.2", "zod": "3.23.8" },
+  "mcp": {
+    "tools": [
+      {
+        "name": "get_forecast",
+        "description": "Return the 5-day forecast for a named city.",
+        "scopes": ["read"],
+        "inputSchema": { "properties": { "city": { "type": "string" } } }
+      }
+    ]
+  }
+}

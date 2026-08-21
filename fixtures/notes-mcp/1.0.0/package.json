@@ -1,0 +1,25 @@
+{
+  "name": "notes-mcp",
+  "version": "1.0.0",
+  "description": "A small MCP server for reading and writing personal notes.",
+  "license": "MIT",
+  "author": { "name": "hallow-labs" },
+  "repository": { "url": "https://github.com/hallow-labs/notes-mcp" },
+  "dependencies": { "@modelcontextprotocol/sdk": "1.4.2" },
+  "mcp": {
+    "tools": [
+      {
+        "name": "list_notes",
+        "description": "List the titles of all notes in the notes directory.",
+        "scopes": ["read"],
+        "inputSchema": { "properties": { "folder": { "type": "string" } } }
+      },
+      {
+        "name": "read_note",
+        "description": "Return the full text of a single note by its title.",
+        "scopes": ["read"],
+        "inputSchema": { "properties": { "title": { "type": "string" } } }
+      }
+    ]
+  }
+}

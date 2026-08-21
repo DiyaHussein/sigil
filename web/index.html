@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sigil — trust registry for agents</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230a0c10'/><path d='M16 5l9 4v7c0 6-4 9.5-9 11-5-1.5-9-5-9-11V9z' fill='none' stroke='%2322c55e' stroke-width='2.5'/></svg>">
+<style>
+  :root {
+    --bg: #0a0c10; --panel: #12151c; --panel2: #191d26; --border: #242a36;
+    --text: #e8edf4; --muted: #8b95a7;
+    --a: #22c55e; --b: #84cc16; --c: #eab308; --d: #f97316; --f: #ef4444;
+    --accent: #6ba5ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.55 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+
+  header.top { border-bottom: 1px solid var(--border); padding: 16px 24px;
+               display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  .brand { font-size: 19px; font-weight: 700; letter-spacing: -.02em; cursor: pointer; }
+  .brand .dot { color: var(--a); }
+  .tagline { color: var(--muted); font-size: 13px; }
+  .grow { flex: 1; }
+  input[type=search] {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; color: var(--text); font-size: 14px; min-width: 260px; outline: none;
+  }
+  input[type=search]:focus { border-color: var(--accent); }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 24px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+       color: var(--muted); margin: 28px 0 12px; font-weight: 600; }
+  h2:first-child { margin-top: 0; }
+
+  .stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .stat .n { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .stat.alarm .n { color: var(--f); }
+
+  .card { background: var(--panel); border: 1px solid var(--border);
+          border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .row { display: flex; gap: 12px; align-items: flex-start; }
+
+  .grade { width: 40px; height: 40px; border-radius: 9px; display: grid; place-items: center;
+           font-weight: 800; font-size: 19px; color: #08110b; flex: none; }
+  .grade.A { background: var(--a); } .grade.B { background: var(--b); }
+  .grade.C { background: var(--c); } .grade.D { background: var(--d); }
+  .grade.F { background: var(--f); color: #fff; }
+  .grade.unknown { background: #384152; color: var(--muted); }
+
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 10px;
+          font-size: 11.5px; font-weight: 600; }
+  .sev-critical { background: rgba(239,68,68,.16); color: #fca5a5; }
+  .sev-high     { background: rgba(249,115,22,.16); color: #fdba74; }
+  .sev-medium   { background: rgba(234,179,8,.16); color: #fde047; }
+  .sev-low      { background: rgba(139,149,167,.16); color: var(--muted); }
+  .sev-info     { background: rgba(139,149,167,.12); color: var(--muted); }
+  .verdict-do-not-install { background: rgba(239,68,68,.16); color: #fca5a5; }
+  .verdict-high-risk      { background: rgba(249,115,22,.16); color: #fdba74; }
+  .verdict-review-first   { background: rgba(234,179,8,.16); color: #fde047; }
+  .verdict-acceptable     { background: rgba(132,204,22,.16); color: #bef264; }
+  .verdict-trusted        { background: rgba(34,197,94,.16); color: #86efac; }
+
+  .rug { border-color: rgba(239,68,68,.45);
+         background: linear-gradient(180deg, rgba(239,68,68,.07), transparent 60%), var(--panel); }
+  .rug-flag { color: #fca5a5; font-weight: 700; font-size: 12px;
+              text-transform: uppercase; letter-spacing: .06em; }
+
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .finding { border-left: 3px solid var(--border); padding: 2px 0 2px 12px; margin: 14px 0; }
+  .finding.critical { border-left-color: var(--f); }
+  .finding.high { border-left-color: var(--d); }
+  .finding.medium { border-left-color: var(--c); }
+  .evidence { background: #06080b; border: 1px solid var(--border); border-radius: 6px;
+              padding: 8px 10px; margin-top: 8px; font-size: 12.5px; overflow-x: auto; }
+  .evidence .loc { color: var(--accent); }
+  .evidence pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; color: #d5dde8; }
+
+  .bar { height: 7px; background: var(--panel2); border-radius: 4px; overflow: hidden; margin-top: 5px; }
+  .bar > i { display: block; height: 100%; background: var(--a); }
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 12px; }
+
+  .change { display: grid; grid-template-columns: 90px 1fr; gap: 10px;
+            padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+  .change:last-child { border-bottom: none; }
+  .change .k { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+  .beforeafter { font-size: 12.5px; margin-top: 4px; }
+  .beforeafter .before { color: #fca5a5; }
+  .beforeafter .after { color: #86efac; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; }
+  .empty { color: var(--muted); padding: 18px 0; }
+  .back { cursor: pointer; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand" onclick="go('/')">sigil<span class="dot">.</span></div>
+  <div class="tagline">what changed under your agent</div>
+  <div class="grow"></div>
+  <input type="search" id="q" placeholder="Search indexed packages…">
+</header>
+
+<main id="view"><div class="empty">Loading…</div></main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const view = $("#view");
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function json(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url} → ${r.status}`);
+  return r.json();
+}
+
+function go(path) {
+  // Routes live under the /app mount, so every pushed path is prefixed.
+  history.pushState({}, "", path === "/" ? "/app/" : "/app" + path);
+  route();
+}
+window.onpopstate = route;
+
+// -- components --------------------------------------------------------------
+
+function gradeBox(g) {
+  const cls = ["A","B","C","D","F"].includes(g) ? g : "unknown";
+  return `<div class="grade ${cls}">${g || "?"}</div>`;
+}
+
+function verdictPill(v) {
+  return v ? `<span class="pill verdict-${v}">${v.replace(/-/g, " ")}</span>` : "";
+}
+
+function packageRow(p) {
+  return `<div class="card"><div class="row">
+    ${gradeBox(p.grade)}
+    <div style="flex:1;min-width:0">
+      <div><a href="/app/p/${p.source}/${encodeURIComponent(p.name)}"
+              onclick="event.preventDefault();go('/p/${p.source}/${encodeURIComponent(p.name)}')"
+              class="mono"><b>${esc(p.name)}</b></a>
+           <span class="muted small">${esc(p.source)} · ${esc(p.latest_version || "")}</span>
+           ${verdictPill(p.verdict)}</div>
+      <div class="small muted">${esc(p.description || "no description")}</div>
+    </div>
+    <div class="mono muted">${p.score != null ? p.score.toFixed(0) : "—"}</div>
+  </div></div>`;
+}
+
+function changeRow(c) {
+  const ba = (c.before || c.after)
+    ? `<div class="beforeafter">
+         ${c.before ? `<div class="before">− ${esc(c.before).slice(0,240)}</div>` : ""}
+         ${c.after  ? `<div class="after">+ ${esc(c.after).slice(0,240)}</div>` : ""}
+       </div>` : "";
+  return `<div class="change">
+    <div><span class="pill sev-${c.severity}">${c.severity}</span></div>
+    <div><div class="k">${esc(c.kind.replace(/_/g, " "))}</div>
+         <div>${esc(c.detail)}</div>${ba}</div>
+  </div>`;
+}
+
+function diffCard(d) {
+  return `<div class="card ${d.rug_pull ? "rug" : ""}">
+    <div class="row" style="align-items:center;margin-bottom:8px">
+      <div style="flex:1">
+        <span class="mono"><b>${esc(d.name || "")}</b></span>
+        <span class="muted">${esc(d.from_version)} → ${esc(d.to_version)}</span>
+      </div>
+      ${d.rug_pull ? '<div class="rug-flag">⚑ rug pull candidate</div>' : ""}
+    </div>
+    ${d.changes.map(changeRow).join("")}
+  </div>`;
+}
+
+function findingCard(f) {
+  const ev = (f.evidence || []).map(e => `
+    <div class="evidence">
+      <span class="loc mono">${esc(e.file)}${e.line ? ":" + e.line : ""}</span>
+      <pre>${esc(e.snippet)}</pre>
+    </div>`).join("");
+  return `<div class="finding ${f.severity}">
+    <div><span class="pill sev-${f.severity}">${f.severity}</span>
+         <b>${esc(f.title)}</b>
+         <span class="muted small mono">${esc(f.rule_id)} · confidence ${f.confidence.toFixed(2)}</span></div>
+    <div class="small muted" style="margin-top:4px">${esc(f.detail)}</div>
+    ${ev}
+    ${f.remediation ? `<div class="small" style="margin-top:8px"><b class="muted">Fix:</b> ${esc(f.remediation)}</div>` : ""}
+  </div>`;
+}
+
+// -- views -------------------------------------------------------------------
+
+async function home() {
+  const [stats, packages, feed] = await Promise.all([
+    json("/api/stats"), json("/api/packages?limit=50"), json("/api/feed/changes?limit=15"),
+  ]);
+
+  view.innerHTML = `
+    <div class="stats">
+      <div class="stat"><div class="n">${stats.packages}</div><div class="l">packages</div></div>
+      <div class="stat"><div class="n">${stats.versions}</div><div class="l">versions</div></div>
+      <div class="stat"><div class="n">${stats.diffs}</div><div class="l">version diffs</div></div>
+      <div class="stat ${stats.rug_pulls ? "alarm" : ""}"><div class="n">${stats.rug_pulls}</div><div class="l">rug pull flags</div></div>
+      <div class="stat ${stats.critical ? "alarm" : ""}"><div class="n">${stats.critical}</div><div class="l">critical findings</div></div>
+    </div>
+
+    <h2>Recent capability changes</h2>
+    <p class="small muted" style="margin-top:-6px">
+      A one-off scan cannot catch a package that was clean for six versions and
+      turned hostile in the seventh. This is that seventh version.
+    </p>
+    ${feed.length ? feed.map(diffCard).join("") : '<div class="empty">No changes recorded yet.</div>'}
+
+    <h2>Indexed packages</h2>
+    ${packages.length ? packages.map(packageRow).join("") : '<div class="empty">Nothing indexed yet.</div>'}
+  `;
+}
+
+async function packagePage(source, name) {
+  let d;
+  try {
+    d = await json(`/api/packages/${source}/${encodeURIComponent(name)}`);
+  } catch {
+    view.innerHTML = `<div class="empty">Not indexed: ${esc(name)}</div>`;
+    return;
+  }
+
+  const p = d.package, s = d.score || {};
+  const comps = ["provenance", "permissions", "findings", "stability", "maturity"];
+  const maxes = { provenance: 25, permissions: 20, findings: 35, stability: 10, maturity: 10 };
+
+  view.innerHTML = `
+    <div class="small back muted" onclick="go('/')">← all packages</div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="row" style="align-items:center">
+        ${gradeBox(p.grade)}
+        <div style="flex:1;min-width:0">
+          <div class="mono" style="font-size:19px"><b>${esc(p.name)}</b>
+            <span class="muted" style="font-size:14px">${esc(d.latest_version || "")}</span></div>
+          <div class="small muted">${esc(p.description || "no description")}</div>
+        </div>
+        <div style="text-align:right">
+          ${verdictPill(p.verdict)}
+          <div class="mono" style="font-size:22px;margin-top:4px">${p.score != null ? p.score.toFixed(0) : "—"}<span class="muted small">/100</span></div>
+        </div>
+      </div>
+      ${s.verdict ? `<div class="small" style="margin-top:10px">${esc(d.score.verdict_detail || "")}</div>` : ""}
+      <div class="small muted" style="margin-top:8px">
+        ${p.repository ? `<a href="${esc(p.repository)}">source</a> · ` : "no source repository · "}
+        ${p.author ? "published by " + esc(p.author) : "unknown publisher"}
+      </div>
+    </div>
+
+    <h2>Score breakdown</h2>
+    <div class="card">
+      <div class="score-grid">
+        ${comps.map(c => `
+          <div>
+            <div class="small"><b>${c}</b>
+              <span class="muted mono">${(s[c] ?? 0).toFixed(1)}/${maxes[c]}</span></div>
+            <div class="bar"><i style="width:${((s[c] ?? 0) / maxes[c]) * 100}%"></i></div>
+          </div>`).join("")}
+      </div>
+      <div class="small muted" style="margin-top:14px">
+        ${(s.reasons || []).map(r => `<div>${esc(r)}</div>`).join("")}
+      </div>
+    </div>
+
+    <h2>Tools exposed (${d.tools.length})</h2>
+    <div class="card">
+      ${d.tools.length ? `<table><thead><tr><th>Name</th><th>Description</th><th>Scopes</th></tr></thead><tbody>
+        ${d.tools.map(t => `<tr>
+          <td class="mono">${esc(t.name)}</td>
+          <td class="small">${esc((t.description || "").slice(0, 180))}</td>
+          <td class="small mono">${esc((t.scopes || []).join(", "))}</td>
+        </tr>`).join("")}
+      </tbody></table>` : '<div class="empty">No tool manifest found.</div>'}
+    </div>
+
+    <h2>Findings (${d.findings.length})</h2>
+    <div class="card">
+      ${d.findings.length ? d.findings.map(findingCard).join("")
+        : '<div class="empty">Nothing above the reporting threshold.</div>'}
+    </div>
+
+    <h2>What changed between versions</h2>
+    ${d.diffs.length ? d.diffs.map(diffCard).join("")
+      : '<div class="empty">Only one version indexed so far.</div>'}
+
+    <h2>Versions</h2>
+    <div class="card"><table><thead><tr><th>Version</th><th>Tools</th><th>Scanned</th></tr></thead><tbody>
+      ${d.versions.map(v => `<tr><td class="mono">${esc(v.version)}</td>
+        <td>${v.tool_count}</td><td class="small muted">${esc((v.scanned_at || "").replace("T", " "))}</td></tr>`).join("")}
+    </tbody></table></div>
+  `;
+}
+
+async function search(q) {
+  const packages = await json(`/api/packages?q=${encodeURIComponent(q)}`);
+  view.innerHTML = `<h2>${packages.length} result(s) for “${esc(q)}”</h2>`
+    + (packages.length ? packages.map(packageRow).join("") : '<div class="empty">Nothing found.</div>');
+}
+
+function route() {
+  const path = location.pathname.replace(/^\/app/, "") || "/";
+  const m = path.match(/^\/p\/([^/]+)\/(.+)$/);
+  const render = m ? packagePage(m[1], decodeURIComponent(m[2])) : home();
+  Promise.resolve(render).catch(e => {
+    view.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  });
+}
+
+let timer;
+$("#q").addEventListener("input", (e) => {
+  clearTimeout(timer);
+  const q = e.target.value.trim();
+  timer = setTimeout(() => (q ? search(q) : route()), 220);
+});
+
+route();
+</script>
+</body>
+</html>

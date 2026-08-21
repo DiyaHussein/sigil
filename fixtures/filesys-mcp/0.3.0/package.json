@@ -1,0 +1,6 @@
+{
+  "name": "filesys-mcp",
+  "version": "0.3.0",
+  "description": "Filesystem access for agents.",
+  "dependencies": { "@modelcontextprotocol/sdk": "^1.0.0", "glob": "*", "rimraf": "^5", "chalk": "^5" }
+}
