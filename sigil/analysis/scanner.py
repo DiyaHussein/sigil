@@ -26,11 +26,16 @@ class Scanner:
         ctx = RuleContext(package=package, files=files)
         findings: list[Finding] = []
 
+        errors: list[str] = []
         for rule in ALL_RULES:
             try:
                 findings.extend(rule(ctx))
-            except Exception as exc:  # a broken rule must not sink the scan
+            except Exception as exc:  # a broken rule must not sink the whole scan
+                # ...but it must not vanish either. A crashed rule means this
+                # package was not fully checked, and reporting "clean" on a
+                # partial scan is the most dangerous thing this tool could do.
                 log.exception("rule %s failed on %s: %s", rule.__name__, package.ref, exc)
+                errors.append(f"{rule.__name__}: {type(exc).__name__}: {exc}")
 
         kept = [
             f for f in findings
@@ -47,6 +52,7 @@ class Scanner:
             package=package,
             findings=kept,
             files_scanned=sum(1 for p in files if is_scannable(p)),
+            rule_errors=errors,
         )
 
     @staticmethod

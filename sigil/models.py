@@ -133,6 +133,13 @@ class ScanResult(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
     scanned_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
     files_scanned: int = 0
+    # Rules that raised. Non-empty means the package was only partially
+    # checked, so "no findings" cannot be read as "clean".
+    rule_errors: list[str] = Field(default_factory=list)
+
+    @property
+    def is_complete(self) -> bool:
+        return not self.rule_errors
 
     def by_severity(self, severity: Severity) -> list[Finding]:
         return [f for f in self.findings if f.severity == severity]

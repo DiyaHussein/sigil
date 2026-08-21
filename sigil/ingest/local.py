@@ -16,12 +16,18 @@ from ..models import PackageVersion
 
 # A tool that reads untrusted packages must bound what it will read: a hostile
 # archive can otherwise exhaust memory before a single rule runs.
-MAX_FILE_BYTES = 1_000_000
+# Bundled JS routinely exceeds 1MB; a cap that silently skips the bundle
+# would report 'clean' on an unread file.
+MAX_FILE_BYTES = 6_000_000
 MAX_FILES = 3_000
 
+# Note what is NOT here: dist/ and build/. In a source repo those are
+# generated noise, but in a published package they are the code that actually
+# runs on the installer's machine. Skipping them means grading a package on its
+# README, which is the worst failure mode this tool can have.
 SKIP_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv",
-    "dist", "build", ".mypy_cache", ".pytest_cache", "site-packages",
+    ".mypy_cache", ".pytest_cache", "site-packages",
 }
 TEXT_SUFFIXES = {
     ".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".json",

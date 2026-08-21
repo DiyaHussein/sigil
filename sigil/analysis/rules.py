@@ -24,9 +24,13 @@ from ..models import Category, Evidence, Finding, PackageVersion, Severity
 # Files whose contents are not the package's own runtime behaviour. Scanning
 # them is the single largest source of false positives: a test fixture that
 # demonstrates a path traversal is not a path traversal.
+# dist/ and build/ are deliberately absent: in a published package they hold
+# the shipped code, and excluding them produces a confident "clean" on a
+# package that was never actually read.
 SKIP_PATH = re.compile(
     r"(^|/)(test|tests|__tests__|spec|specs|example|examples|demo|demos|"
-    r"docs?|fixtures?|node_modules|vendor|site-packages|dist|build|\.git)(/|$)",
+    r"site-packages|"
+    r"docs?|fixtures?|node_modules|vendor|third_party|thirdparty|\.git)(/|$)",
     re.IGNORECASE,
 )
 SKIP_FILE = re.compile(
@@ -51,6 +55,38 @@ def _evidence(path: str, text: str, match_start: int) -> Evidence:
     lines = _lines(text)
     snippet = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
     return Evidence(file=path, line=line_no, snippet=snippet)
+
+
+def _is_commented(text: str, pos: int) -> bool:
+    """
+    Whether the match sits on a commented line.
+
+    Real regression: a scan of a real package reported a critical eval() that
+    was `// const zodSchema = eval(zodSchemaStr)` — commented-out code.
+    """
+    line_start = text.rfind("\n", 0, pos) + 1
+    prefix = text[line_start:pos].lstrip()
+    return prefix.startswith(("//", "#", "*", "/*"))
+
+
+def _is_bundled(text: str) -> bool:
+    """
+    Whether a file looks like a minified or bundled artifact.
+
+    Proximity heuristics are meaningless in a bundle: the whole file is
+    effectively one line, so "tainted input nearby" is always true and every
+    match escalates to critical. A real package was flagged critical because
+    the string `arguments` appeared somewhere in an inlined dependency.
+
+    Such files are still scanned by the high-precision rules (secrets,
+    manifest injection) — only the proximity-based ones step aside.
+    """
+    if not text:
+        return False
+    lines = text.count("\n") + 1
+    if len(text) / lines > 400:
+        return True
+    return any(len(ln) > 5000 for ln in text.splitlines()[:200])
 
 
 @dataclass
@@ -154,24 +190,52 @@ _NORMALISED = re.compile(
     r"startswith\s*\(|relative_to)",
     re.IGNORECASE,
 )
+# Names that genuinely denote a caller-supplied value. Deliberately narrow: an
+# earlier version matched `user_?\w*`, which flagged `path.join(userDataDir,
+# 'DevToolsActivePort')` in a real package — a join of two constants — and that
+# is precisely the kind of false positive that makes a scanner ignorable.
 _TAINT = re.compile(
-    r"\b(arguments?|params?|request|input|user_?\w*|args\[|kwargs|payload|body)\b",
+    r"\b(arguments|params?|kwargs|payload|user_?input|userInput|"
+    r"req\.body|request\.\w+|args\[)\b",
     re.IGNORECASE,
 )
 
 
+def _call_args(text: str, start: int) -> str:
+    """
+    The text inside the matched call's parentheses.
+
+    Taint has to be checked against the call's own arguments. Scanning a loose
+    window around the match flags calls whose arguments are all constants
+    merely because something tainted appears on a nearby line.
+    """
+    open_paren = text.find("(", start)
+    if open_paren == -1:
+        return ""
+    depth = 0
+    for i in range(open_paren, min(len(text), open_paren + 400)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_paren + 1 : i]
+    return text[open_paren + 1 : open_paren + 200]
+
+
 def rule_path_traversal(ctx: RuleContext) -> Iterator[Finding]:
     for path, text in ctx.files.items():
-        if not is_scannable(path):
+        if not is_scannable(path) or _is_bundled(text):
             continue
         for m in _PATH_JOIN.finditer(text):
-            window = text[m.start() : m.start() + 300]
-            # Only flag when caller-controlled data reaches the join AND no
-            # containment check appears nearby. Both conditions matter: either
-            # alone produces the noise that makes these tools ignorable.
-            if not _TAINT.search(window):
+            if _is_commented(text, m.start()):
                 continue
-            if _NORMALISED.search(window):
+            # Taint must be inside the call's own arguments. Scanning a loose
+            # window around it flags joins of adjacent constants.
+            call_args = _call_args(text, m.start())
+            if not _TAINT.search(call_args):
+                continue
+            if _NORMALISED.search(text[max(0, m.start() - 300) : m.start() + 300]):
                 continue
             yield Finding(
                 rule_id="filesystem/path-traversal",
@@ -202,13 +266,51 @@ _SECRET_PATTERNS: list[tuple[str, str, float]] = [
     (r"sk-ant-[A-Za-z0-9_-]{20,}", "an Anthropic secret key", 0.95),
     (r"gh[pousr]_[A-Za-z0-9]{30,}", "a GitHub token", 0.95),
     (r"AKIA[0-9A-Z]{16}", "an AWS access key id", 0.95),
-    (r"AIza[0-9A-Za-z_-]{30,}", "a Google API key", 0.9),
     (r"-----BEGIN\s+(RSA|EC|OPENSSH|PGP)?\s*PRIVATE KEY", "a private key", 0.98),
 ]
 _PLACEHOLDER = re.compile(
     r"(your[_-]?|example|placeholder|xxx+|<[^>]+>|\.\.\.|changeme|dummy|fake|test)",
     re.IGNORECASE,
 )
+
+
+# Google API keys shipped in client code are frequently intentional — they are
+# restricted by referrer and quota rather than kept secret. Worth surfacing,
+# never worth a "do not install".
+_PUBLISHABLE_SECRETS: list[tuple[str, str]] = [
+    (r"AIza[0-9A-Za-z_-]{30,}", "a Google API key"),
+]
+
+
+def rule_publishable_key(ctx: RuleContext) -> Iterator[Finding]:
+    for path, text in ctx.files.items():
+        if not is_scannable(path):
+            continue
+        for pattern, human in _PUBLISHABLE_SECRETS:
+            m = re.search(pattern, text)
+            if not m or _PLACEHOLDER.search(m.group(0)):
+                continue
+            yield Finding(
+                rule_id="credentials/embedded-api-key",
+                title=f"Ships {human} in its published code",
+                severity=Severity.MEDIUM,
+                category=Category.CREDENTIALS,
+                confidence=0.9,
+                detail=(
+                    "Keys of this type are often published deliberately and "
+                    "restricted by referrer and quota rather than kept secret. "
+                    "Verify it is scoped as intended before treating it as a leak."
+                ),
+                evidence=[
+                    Evidence(
+                        file=path,
+                        line=text.count("\n", 0, m.start()) + 1,
+                        snippet=m.group(0)[:12] + "…[redacted]",
+                    )
+                ],
+                remediation="Confirm the key is restricted, or move it server-side.",
+            )
+            break
 
 
 def rule_hardcoded_secret(ctx: RuleContext) -> Iterator[Finding]:
@@ -299,10 +401,16 @@ _EXEC_PATTERNS: list[tuple[str, str, Severity, float]] = [
 
 def rule_dynamic_execution(ctx: RuleContext) -> Iterator[Finding]:
     for path, text in ctx.files.items():
-        if not is_scannable(path):
+        if not is_scannable(path) or _is_bundled(text):
             continue
         for pattern, human, severity, confidence in _EXEC_PATTERNS:
-            m = re.search(pattern, text)
+            m = next(
+                (
+                    match for match in re.finditer(pattern, text)
+                    if not _is_commented(text, match.start())
+                ),
+                None,
+            )
             if not m:
                 continue
             window = text[max(0, m.start() - 200) : m.start() + 200]
@@ -342,11 +450,10 @@ _URL_ALLOWLIST = re.compile(
 
 def rule_unrestricted_egress(ctx: RuleContext) -> Iterator[Finding]:
     for path, text in ctx.files.items():
-        if not is_scannable(path):
+        if not is_scannable(path) or _is_bundled(text):
             continue
         for m in _FETCH.finditer(text):
-            window = text[m.start() : m.start() + 250]
-            if not _TAINT.search(window):
+            if not _TAINT.search(_call_args(text, m.start())):
                 continue
             if _URL_ALLOWLIST.search(text):
                 continue
@@ -499,6 +606,7 @@ ALL_RULES = [
     rule_tool_description_injection,
     rule_path_traversal,
     rule_hardcoded_secret,
+    rule_publishable_key,
     rule_static_credential_auth,
     rule_dynamic_execution,
     rule_unrestricted_egress,

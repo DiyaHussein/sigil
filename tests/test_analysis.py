@@ -316,3 +316,139 @@ def test_tool_fingerprint_changes_with_description():
 
 def test_malformed_source_does_not_crash_extraction():
     assert extract_tools({"broken.py": "def (((", "broken.json": "{not json"}) == []
+
+
+# ---------------------------------------------------------------------------
+# Regressions found by running against real npm packages
+# ---------------------------------------------------------------------------
+
+
+def test_no_rule_crashes_on_any_fixture(scanner):
+    """
+    A crashed rule is swallowed so one bad rule cannot sink a scan — which
+    means a NameError can silently turn "not checked" into "clean". This test
+    exists because exactly that happened.
+    """
+    for rel in ("notes-mcp/1.0.0", "notes-mcp/1.1.0",
+                "weather-mcp/2.1.0", "filesys-mcp/0.3.0"):
+        pkg, files = _load(rel)
+        result = scanner.scan(pkg, files)
+        assert result.is_complete, f"{rel}: rules crashed → {result.rule_errors}"
+
+
+def test_path_traversal_is_actually_detected(scanner):
+    """
+    The positive counterpart to the suppression test. Only asserting that a
+    rule stays silent lets a permanently broken rule pass forever.
+    """
+    pkg, files = _load("filesys-mcp/0.3.0")
+    ids = [f.rule_id for f in scanner.scan(pkg, files).findings]
+    assert "filesystem/path-traversal" in ids
+
+
+def test_joining_two_constants_is_not_path_traversal(scanner):
+    """
+    Regression: `path.join(userDataDir, 'DevToolsActivePort')` in a real
+    package was flagged because the taint pattern matched `userDataDir`.
+    """
+    pkg = PackageVersion(name="x", version="1.0.0")
+    files = {
+        "browser.js": (
+            "const userDataDir = getProfileDir();\n"
+            "const portPath = path.join(userDataDir, 'DevToolsActivePort');\n"
+        )
+    }
+    ids = [f.rule_id for f in scanner.scan(pkg, files).findings]
+    assert "filesystem/path-traversal" not in ids
+
+
+def test_taint_must_be_inside_the_call_not_merely_nearby(scanner):
+    """A tainted value on an adjacent line does not make a constant join unsafe."""
+    pkg = PackageVersion(name="x", version="1.0.0")
+    files = {
+        "srv.js": (
+            "const name = params.name;\n"
+            "log(name);\n"
+            "const cfg = path.join(BASE, 'config.json');\n"
+        )
+    }
+    ids = [f.rule_id for f in scanner.scan(pkg, files).findings]
+    assert "filesystem/path-traversal" not in ids
+
+
+def test_vendored_third_party_code_is_skipped():
+    """Vendored bundles are not the package's own behaviour."""
+    assert not is_scannable("build/src/third_party/lighthouse-bundle.js")
+    assert not is_scannable("lib/thirdparty/worker.js")
+    assert is_scannable("build/src/tools/performance.js")
+
+
+def test_shipped_build_output_is_scanned():
+    """
+    dist/ and build/ hold the code that actually runs once installed. Skipping
+    them graded a real package on its README alone.
+    """
+    assert is_scannable("build/src/McpContext.js")
+    assert is_scannable("dist/index.js")
+
+
+def test_google_api_key_is_flagged_but_not_critical(scanner):
+    """
+    Keys of this class are routinely published on purpose. Detect them, but
+    never on the strength of a "do not install".
+    """
+    pkg = PackageVersion(name="x", version="1.0.0", repository="https://example.com/r")
+    # Assembled rather than written literally: it must match the key pattern
+    # without containing a word the placeholder filter would (correctly) reject,
+    # and without a real-looking key sitting in the repository.
+    synthetic = "AIza" + "S" * 35
+    files = {"perf.js": f"const KEY = '{synthetic}';\n"}
+    result = scanner.scan(pkg, files)
+    embedded = [f for f in result.findings if f.rule_id == "credentials/embedded-api-key"]
+    assert embedded, "should still surface the key"
+    assert embedded[0].severity == Severity.MEDIUM
+    assert verdict(score(result), result)[0] != "do-not-install"
+
+
+def test_commented_out_code_is_not_a_finding(scanner):
+    """
+    Regression from a real package: `// const zodSchema = eval(zodSchemaStr)`
+    was reported as a live eval().
+    """
+    pkg = PackageVersion(name="x", version="1.0.0")
+    files = {
+        "parser.ts": (
+            "function build(schemaStr) {\n"
+            "  // const zodSchema = eval(schemaStr)\n"
+            "  return null\n"
+            "}\n"
+        ),
+        "util.py": "# result = eval(expr)\n",
+    }
+    ids = [f.rule_id for f in scanner.scan(pkg, files).findings]
+    assert "execution/dynamic" not in ids
+
+
+def test_bundled_files_do_not_escalate_on_proximity(scanner):
+    """
+    Regression: a minified CLI bundle was reported critical because the string
+    `arguments` appeared somewhere in an inlined dependency. In a file with no
+    line structure, "nearby" means nothing.
+    """
+    blob = (
+        "function a(){return 1}" * 400
+        + "new Function(x);var q=arguments;"
+        + "function b(){return 2}" * 400
+    )
+    pkg = PackageVersion(name="x", version="1.0.0")
+    result = scanner.scan(pkg, {"bin/cli.mjs": blob})
+    assert "execution/dynamic" not in [f.rule_id for f in result.findings]
+
+
+def test_ordinary_source_still_escalates(scanner):
+    """The bundle guard must not disable the rule on normal code."""
+    pkg = PackageVersion(name="x", version="1.0.0")
+    files = {"srv.py": "def run(params):\n    subprocess.run(params['cmd'], shell=True)\n"}
+    execs = [f for f in scanner.scan(pkg, files).findings
+             if f.rule_id == "execution/dynamic"]
+    assert execs and execs[0].severity == Severity.CRITICAL
