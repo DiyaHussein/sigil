@@ -99,6 +99,27 @@
   th { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; }
   .empty { color: var(--muted); padding: 18px 0; }
   .back { cursor: pointer; }
+
+  /* -- the explainer: what this is, for someone who just landed here -- */
+  .hero { padding: 10px 0 26px; border-bottom: 1px solid var(--border); margin-bottom: 26px; }
+  .hero h1 { font-size: 30px; line-height: 1.25; letter-spacing: -.02em;
+             margin: 0 0 14px; max-width: 20ch; }
+  .hero .lede { font-size: 16px; color: #c3ccda; max-width: 62ch; margin: 0 0 26px; }
+  .two-up { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 780px) { .two-up { grid-template-columns: 1fr; }
+                              .hero h1 { font-size: 24px; } }
+  .explain { background: var(--panel); border: 1px solid var(--border);
+             border-radius: 10px; padding: 18px; }
+  .explain.accent { border-color: rgba(34,197,94,.35);
+                    background: linear-gradient(180deg, rgba(34,197,94,.06), transparent 65%), var(--panel); }
+  .explain .step { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+                   color: var(--muted); font-weight: 600; }
+  .explain.accent .step { color: var(--a); }
+  .explain h3 { margin: 8px 0 8px; font-size: 18px; }
+  .explain p { margin: 0; font-size: 14px; color: #b6c0cf; }
+  .hero .why { margin: 22px 0 0; font-size: 14px; color: var(--muted);
+               max-width: 74ch; border-left: 2px solid var(--border); padding-left: 14px; }
+  .hero .why b { color: var(--text); }
 </style>
 </head>
 <body>
@@ -206,6 +227,44 @@ async function home() {
   ]);
 
   view.innerHTML = `
+    <section class="hero">
+      <h1>Know what your agent's plug-ins can do — and when that changes.</h1>
+      <p class="lede">
+        AI agents get their abilities from plug-ins. Installing one hands it real
+        power: your files, your network, your credentials. Almost nobody reads the
+        source first. Sigil reads it for you.
+      </p>
+
+      <div class="two-up">
+        <div class="explain">
+          <div class="step">Before you install</div>
+          <h3>Is this safe?</h3>
+          <p>
+            We download the package and read it <em>without running it</em>, then
+            grade it. Every issue we report shows the exact file, line and line of
+            code — so you can check our work instead of trusting a number.
+          </p>
+        </div>
+        <div class="explain accent">
+          <div class="step">After you install</div>
+          <h3>Did it change?</h3>
+          <p>
+            You approved version 1.0. Version 1.1 ships and your agent picks it up
+            silently. We compare them and tell you what the new version
+            <em>gained</em> — new tools, wider permissions, a hidden instruction,
+            a new owner.
+          </p>
+        </div>
+      </div>
+
+      <p class="why">
+        <b>Why the second one matters:</b> other scanners check a package once. But
+        the attack isn't “publish something evil” — it's “be useful for six months,
+        get trusted, then turn.” You only catch that by comparing versions.
+      </p>
+    </section>
+
+    <h2>Registry</h2>
     <div class="stats">
       <div class="stat"><div class="n">${stats.packages}</div><div class="l">packages</div></div>
       <div class="stat"><div class="n">${stats.versions}</div><div class="l">versions</div></div>
